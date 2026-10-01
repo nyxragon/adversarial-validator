@@ -1,0 +1,11 @@
+{
+  "name": "nyxragon-plugins",
+  "description": "Security research tooling for Claude Code — starting with the Adversarial Finding Validator.",
+  "owner": { "name": "nyxragon" },
+  "plugins": [
+    {
+      "name": "adversarial-validator",
+      "source": "./"
+    }
+  ]
+}

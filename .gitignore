@@ -1,0 +1,8 @@
+# The Bugcrowd VRT is fetched at build time from Bugcrowd's official taxonomy,
+# not redistributed in this MIT repo. Run: python3 scripts/build_vrt.py
+reference/bugcrowd-vrt-flat.txt
+
+# OS / editor noise
+.DS_Store
+*.swp
+__pycache__/

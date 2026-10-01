@@ -1,0 +1,21 @@
+{
+  "name": "adversarial-validator",
+  "displayName": "Adversarial Finding Validator",
+  "version": "0.1.0",
+  "description": "An isolated, adversarial subagent that validates a security finding before you report it: evidence-only (no hunting context, so it never inherits the finder's optimism), platform-aware severity anchoring (Bugcrowd VRT + CVSS 3.1 for HackerOne / Intigriti / YesWeHack / Synack / CVD / CVE), an instrument-artifact (false-positive) catalog, and a blunt SUBMIT / LEAD / KILL verdict.",
+  "author": { "name": "nyxragon" },
+  "homepage": "https://github.com/nyxragon/adversarial-validator",
+  "repository": "https://github.com/nyxragon/adversarial-validator",
+  "license": "MIT",
+  "keywords": [
+    "security",
+    "bug-bounty",
+    "vulnerability",
+    "validation",
+    "triage",
+    "cvss",
+    "bugcrowd-vrt",
+    "subagent",
+    "false-positive"
+  ]
+}
