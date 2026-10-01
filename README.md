@@ -1,142 +1,176 @@
-# Adversarial Finding Validator
+<div align="center">
 
-A Claude Code plugin that **tries to kill your security finding before a triager does.**
+# 🛡️ Adversarial Finding Validator
 
-It ships a subagent, `finding-validator`, that runs in an **isolated context with no hunting
-history** — so it never inherits the optimism of whoever found the bug. You hand it the *evidence*,
-not your theory; it hands back a blunt verdict, a severity anchored to the right system, and the one
-reason the finding would be closed.
+**An isolated AI subagent that tries to kill your security finding before a triager does.**
 
-Most "ask an LLM to review my bug" setups fail the same way: the model sees the hunter's reasoning and
-rationalizes it into a yes. This fixes that structurally — the validator is a separate agent, fed
-evidence only, told to assume you were wrong and find out why.
+[![License: MIT](https://img.shields.io/badge/License-MIT-1f6feb?style=flat-square)](LICENSE)
+&nbsp;![Version](https://img.shields.io/badge/version-0.1.0-8957e5?style=flat-square)
+&nbsp;![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-d97757?style=flat-square)
+&nbsp;![Verdicts](https://img.shields.io/badge/verdicts-SUBMIT%20·%20PROVE%20·%20INVESTIGATE%20·%20DISCARD-2ea043?style=flat-square)
 
-> Prior art: the isolated "disprove-bot" idea is well established in offensive-AI work (rez0's separate
-> validation bot, XBOW's validators, Project Zero's Big Sleep / Naptime oracle-first loop). This plugin
-> packages that discipline with multi-platform severity anchoring and a false-positive catalog.
+[🧪 Demo](#-demo) &nbsp;·&nbsp; [📦 Install](#-install) &nbsp;·&nbsp; [⌨️ Usage](#%EF%B8%8F-usage) &nbsp;·&nbsp; [🧠 How it works](#-how-it-works) &nbsp;·&nbsp; [⚙️ Configuration](#%EF%B8%8F-configuration)
 
-## The four verdicts
+</div>
 
-| Verdict | Meaning | What you do |
-|---|---|---|
-| **SUBMIT** | Proven, reproducible, real impact, in scope. | Write the report, at the anchored severity. |
-| **PROVE** | It **is** a real vulnerability; only the demonstration is missing. | Produce the one proof it names (fire the oracle / show the live repro / demonstrate reachability), then it's SUBMIT. |
-| **INVESTIGATE** | Plausible but **not yet established as real** — something load-bearing is unknown. | Resolve the one open question it names. |
-| **DISCARD** | Not a valid finding (no impact, not reachable, always-rejected class, or an instrument artifact). | Drop it; record why so it isn't re-run. |
+AI-assisted vulnerability hunting has a signal problem: the same model that finds a bug will cheerfully
+agree it is real the moment you ask. The result is a flood of false positives and mis-scored reports
+that is dragging down bug-bounty and coordinated-disclosure triage. The **Adversarial Finding Validator**
+is the counterweight: a Claude Code subagent that runs with **no hunting context**, sees only the
+evidence (never your hypothesis), and returns one of four verdicts with a severity it derives itself.
 
-`PROVE` is deliberately **not** a weak verdict — it affirms the bug is real and just needs its demo.
-That distinction (real-but-undemonstrated vs. maybe-real) is the whole point.
+> [!IMPORTANT]
+> The isolation is the whole point. A validator that knows your theory rubber-stamps it, so this one
+> is never told why you think the bug is real. It is built to prove you wrong.
 
-## Example
+---
 
-Hand it the evidence for an SSRF you think is a High, and it comes back:
+## 🧪 Demo
 
-```
+Feed it the evidence for an SSRF you think is a High. It answers:
+
+```text
 VERDICT:   PROVE
-PLATFORM:  HackerOne — CVSS 3.1
-SEVERITY:  CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N = 7.1 High  (if the read is shown)
-           currently demonstrated: external-only fetch -> C:L ≈ 2.7 Low
-GATE:      #9 fails — the server fetches an external host you control, but reaching a
-           RESTRICTED internal target (the impact the severity rests on) is not shown.
-FP CHECK:  Ruled out reflected-marker and DNS-only — a real HTTP GET+POST was received
+PLATFORM:  Bugcrowd (VRT, with CVSS support)
+SEVERITY:  P2  Server Security Misconfiguration > SSRF > Internal High Impact   (if the read is shown)
+           demonstrated so far: P4  Server Security Misconfiguration > SSRF > External
+           CVSS support: CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:N/A:N = 2.7 Low
+GATE:      #9 fails. The server fetches an attacker-controlled external host, but reaching a
+           restricted internal target (the priority rests on it) is not shown.
+FP CHECK:  Ruled out reflected-marker and DNS-only. A real HTTP GET and POST were received
            server-side, not just a DNS callback.
-DEDUP:     No public CVE/advisory found for this endpoint.
-REASON:    The SSRF primitive is proven live, but the whole severity depends on reaching
-           internal/metadata, which the evidence does not demonstrate.
+DEDUP:     No prior public disclosure found for this endpoint.
+REASON:    The SSRF primitive is proven live. P2 depends on reaching internal secrets, which the
+           evidence does not demonstrate; today it anchors to the external-SSRF line.
 NEXT:      Point the fetch at the metadata IP and capture the credential arriving at your
-           listener. Produce that and it is SUBMIT.
+           listener. Produce that and it becomes SUBMIT at the P2 line.
 ```
 
-It affirmed the bug, refused to hand you an unearned High, separated the proven severity from the
-ceiling, and told you the single thing to do next. That is the whole loop.
+It confirmed the bug, refused to hand you an unearned P2, split the proven priority from the ceiling,
+and named the one thing left to prove. That is the whole loop.
 
-## Severity, anchored to the platform
+---
 
-The validator never states a severity it can't derive. It detects the target platform and anchors to
-that platform's system:
+## 🎯 Why
 
-- **Bugcrowd** → the exact **VRT** line (P1–P5), quoted, plus a supporting CVSS vector.
-- **HackerOne / Intigriti / YesWeHack / Synack / Cobalt** → a full **CVSS 3.1** vector + band.
-- **Coordinated disclosure / CVE / GitHub Security Advisory** → a full **CVSS 3.1** vector.
-- **Platform not stated** → defaults to CVSS 3.1 and says so.
+> [!NOTE]
+> AI-assisted hunting floods triage with false positives and mis-scored reports. Valid-rates are
+> dropping and programs have shut down over it.
 
-Universal rule: it computes the CVSS vector itself. *The vector is the claim; the number is arithmetic.*
+- **You cannot validate your own finding.** Ask an LLM "is this real?" with your reasoning attached and
+  it agrees with you.
+- **Reports die on severity, not just validity.** A Critical that recomputes to Medium gets downgraded;
+  an impact that was never demonstrated gets closed. This catches both before you send.
+- **It is a decision, not an opinion.** You get SUBMIT / PROVE / INVESTIGATE / DISCARD and the single
+  next step, not a paragraph of hedging.
 
-## What it refuses to be fooled by
+---
 
-Before believing any evidence, it rules out the instrument artifacts that routinely fake a positive:
-a proxy/client error page served as `200`, catch-all responses, CDN/WAF refusals mistaken for app
-behaviour, silent egress bans, reflected markers, versions read from a filename, and oracles run
-without a negative control. (See `agents/finding-validator.md` §3.)
+## 📦 Install
 
-## Install
-
-Requires [Claude Code](https://claude.com/claude-code). This repo is itself a plugin marketplace.
+Requires [Claude Code](https://claude.com/claude-code).
 
 ```bash
-# add the marketplace (once), then install
 claude plugin marketplace add nyxragon/adversarial-validator
 claude plugin install adversarial-validator@nyxragon-plugins
 ```
 
-Or load it ad-hoc for one session without installing:
+<details>
+<summary>Other ways to run it</summary>
 
 ```bash
+# load for a single session, no install
 claude --plugin-dir /path/to/adversarial-validator
 ```
 
-Then build the Bugcrowd VRT data (optional, for Bugcrowd findings — the plugin works without it):
-
 ```bash
+# optional: build the Bugcrowd VRT table for VRT anchoring (works without it)
 python3 scripts/build_vrt.py
 ```
 
-## Use
+</details>
 
-Invoke the slash command with evidence only:
+---
 
-```
-/adversarial-validator:validate <paste the request/response, baseline, attacker path, impact, platform>
-```
+## ⌨️ Usage
 
-…or launch the agent directly: `@agent-adversarial-validator:finding-validator`.
+> [!TIP]
+> Give it **evidence, not your argument**. If you plead your case, you defeat the isolation that makes
+> it work.
 
-**Give it evidence, not your reasoning:** the exact request(s)/response(s) with status + body markers,
-the baseline that proves it isn't a catch-all, the real attacker trigger path, the concrete data or
-state change demonstrated, the platform, and any dedup you've done. If you argue your case, you defeat
-the isolation that makes it useful.
-
-## Configuration
-
-The agent is set to `model: opus` (complex adversarial reasoning benefits from the strongest model).
-If your plan doesn't include Opus, edit `agents/finding-validator.md` and change `model:` to `sonnet`.
-
-## Layout
-
-```
-adversarial-validator/
-├── .claude-plugin/
-│   ├── plugin.json          # plugin manifest
-│   └── marketplace.json     # makes this repo installable as a marketplace
-├── agents/
-│   └── finding-validator.md # the validator (the product)
-├── commands/
-│   └── validate.md          # thin launcher for the agent
-├── reference/
-│   ├── cvss-3.1-metrics.md
-│   ├── platform-severity-map.md
-│   └── README.md            # how to build the VRT file
-├── scripts/
-│   └── build_vrt.py         # fetch + flatten Bugcrowd's official VRT
-├── LICENSE                  # MIT
-└── README.md
+```text
+/adversarial-validator:validate
+  the exact request and response, with status and body markers
+  the baseline that proves the response is not a catch-all
+  the real attacker trigger path
+  what concrete data or state change was demonstrated
+  the target platform, and any dedup already done
 ```
 
-## Contributing
+Or launch the agent directly: `@agent-adversarial-validator:finding-validator`
 
-The false-positive catalog and the platform map are meant to grow. If an instrument artifact fooled
-you, or a platform uses a severity system that isn't mapped, open a PR.
+**Typical flow**
 
-## License
+- A fresh finding returns **PROVE** with the one proof to produce. You produce it, re-run, and it
+  becomes **SUBMIT**.
+- A bug you called Critical returns with a recomputed vector one band lower, so you file it right
+  instead of getting downgraded.
+- A "bug" that only reads your own request back returns **DISCARD**, with the artifact named.
 
-MIT — see [LICENSE](LICENSE). The Bugcrowd VRT is Bugcrowd's and is fetched, not redistributed here.
+---
+
+## 🧠 How it works
+
+A dedicated subagent, handed the evidence only and told to assume you were wrong and find out why.
+
+| | Verdict | Meaning | Next step |
+|:--:|---|---|---|
+| ✅ | **SUBMIT** | Proven, reproducible, real impact, in scope. | Report it at the anchored severity. |
+| 🔬 | **PROVE** | A real bug; only the demonstration is missing. | Produce the one proof it names. |
+| 🔎 | **INVESTIGATE** | Plausible, but something load-bearing is unknown. | Resolve the one open question. |
+| 🗑️ | **DISCARD** | Not a valid finding. | Drop it, with the reason recorded. |
+
+Every verdict carries:
+
+- **A severity it derives, not one you assert.** It computes a CVSS 3.1 vector and, for Bugcrowd,
+  quotes the exact VRT line. *The vector is the claim; the number is arithmetic.* It corrects
+  over-scored and under-scored reports alike.
+- **Platform-aware anchoring.** Bugcrowd uses the VRT; HackerOne, Intigriti, YesWeHack and Synack use
+  CVSS 3.1; coordinated disclosure, CVE and GitHub advisories use CVSS 3.1.
+- **A false-positive screen** that rules out, by name, the artifacts that fake a positive.
+
+<details>
+<summary>What the false-positive screen catches</summary>
+
+- A proxy or client error page served as a `200`
+- Catch-all responses that answer identically for an invented path
+- WAF or edge refusals mistaken for application behaviour
+- Reflected markers (your own request echoed back)
+- Versions read from a filename rather than file contents
+- Oracles run without a negative control
+- Always-informational classes (missing headers, self-XSS, DNS-only SSRF, open redirect with no
+  chain) are rejected unless chained to real impact
+
+</details>
+
+---
+
+## ⚙️ Configuration
+
+- Severity follows the platform you state, and defaults to CVSS 3.1 when none is given.
+- The Bugcrowd VRT table is built locally by `scripts/build_vrt.py` and read from `reference/`.
+- The agent runs on `model: opus`.
+
+> [!NOTE]
+> No Opus access on your plan? Set `model:` to `sonnet` in `agents/finding-validator.md`.
+
+---
+
+## 🤝 Contributing
+
+The false-positive catalog and the platform map are meant to grow. A missed artifact or an unmapped
+platform makes a good PR.
+
+## 📄 License
+
+[MIT](LICENSE). The Bugcrowd VRT is Bugcrowd's, fetched at build time rather than redistributed here.

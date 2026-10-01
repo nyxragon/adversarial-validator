@@ -2,6 +2,9 @@
 # not redistributed in this MIT repo. Run: python3 scripts/build_vrt.py
 reference/bugcrowd-vrt-flat.txt
 
+# local only, never publish: conference submission draft + strategy notes
+SUBMISSION-DRAFT.md
+
 # OS / editor noise
 .DS_Store
 *.swp
