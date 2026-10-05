@@ -9,7 +9,7 @@
 &nbsp;![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-d97757?style=flat-square)
 &nbsp;![Verdicts](https://img.shields.io/badge/verdicts-SUBMIT%20·%20PROVE%20·%20INVESTIGATE%20·%20DISCARD-2ea043?style=flat-square)
 
-[🧪 Demo](#-demo) &nbsp;·&nbsp; [📦 Install](#-install) &nbsp;·&nbsp; [⌨️ Usage](#%EF%B8%8F-usage) &nbsp;·&nbsp; [🧠 How it works](#-how-it-works) &nbsp;·&nbsp; [⚙️ Configuration](#%EF%B8%8F-configuration)
+[Demo](#demo) &nbsp;·&nbsp; [Install](#install) &nbsp;·&nbsp; [Usage](#usage) &nbsp;·&nbsp; [How it works](#how-it-works) &nbsp;·&nbsp; [Configuration](#configuration)
 
 </div>
 
@@ -25,7 +25,7 @@ evidence (never your hypothesis), and returns one of four verdicts with a severi
 
 ---
 
-## 🧪 Demo
+## Demo
 
 Feed it the evidence for an SSRF you think is a High. It answers:
 
@@ -51,7 +51,7 @@ and named the one thing left to prove. That is the whole loop.
 
 ---
 
-## 🎯 Why
+## Why
 
 > [!NOTE]
 > AI-assisted hunting floods triage with false positives and mis-scored reports. Valid-rates are
@@ -66,7 +66,7 @@ and named the one thing left to prove. That is the whole loop.
 
 ---
 
-## 📦 Install
+## Install
 
 Requires [Claude Code](https://claude.com/claude-code).
 
@@ -85,14 +85,16 @@ claude --plugin-dir /path/to/adversarial-validator
 
 ```bash
 # optional: build the Bugcrowd VRT table for VRT anchoring (works without it)
-python3 scripts/build_vrt.py
+python3 scripts/build_vrt.py                 # newest tagged release (default)
+python3 scripts/build_vrt.py --version 1.18  # pin a specific release
+python3 scripts/build_vrt.py --list-versions # see what is available
 ```
 
 </details>
 
 ---
 
-## ⌨️ Usage
+## Usage
 
 > [!TIP]
 > Give it **evidence, not your argument**. If you plead your case, you defeat the isolation that makes
@@ -119,7 +121,7 @@ Or launch the agent directly: `@agent-adversarial-validator:finding-validator`
 
 ---
 
-## 🧠 How it works
+## How it works
 
 A dedicated subagent, handed the evidence only and told to assume you were wrong and find out why.
 
@@ -155,10 +157,15 @@ Every verdict carries:
 
 ---
 
-## ⚙️ Configuration
+## Configuration
 
 - Severity follows the platform you state, and defaults to CVSS 3.1 when none is given.
 - The Bugcrowd VRT table is built locally by `scripts/build_vrt.py` and read from `reference/`.
+  It defaults to the **newest tagged VRT release**; pin an older one with `--version <release>`
+  (e.g. `--version 1.18`), track the rolling edge with `--version master`, or list what is
+  available with `--list-versions`. The built file records which version it holds in a header.
+  From inside Claude Code the same is a slash command: `/vrt` (newest), `/vrt 1.18` (pin),
+  `/vrt master` (edge), `/vrt list` (show releases).
 - The agent runs on `model: opus`.
 
 > [!NOTE]
@@ -166,11 +173,11 @@ Every verdict carries:
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 The false-positive catalog and the platform map are meant to grow. A missed artifact or an unmapped
 platform makes a good PR.
 
-## 📄 License
+## License
 
 [MIT](LICENSE). The Bugcrowd VRT is Bugcrowd's, fetched at build time rather than redistributed here.
