@@ -151,9 +151,11 @@ Every verdict carries:
 
 ## Contributing
 
-The false-positive catalog and the platform map are meant to grow. A missed artifact or an unmapped
-platform makes a good PR.
+PRs that extend coverage are welcome: a new instrument-artifact pattern for the false-positive screen,
+a platform's severity mapping in `reference/platform-severity-map.md`, a `proofcheck.py` schema for a
+bug class not yet covered, or a case for the validation benchmark. Open an issue first for anything that
+changes what a verdict means.
 
 ## License
 
-[MIT](LICENSE). The Bugcrowd VRT is Bugcrowd's, fetched at build time rather than redistributed here.
+[MIT](LICENSE).
