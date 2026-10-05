@@ -1,39 +1,53 @@
 #!/usr/bin/env python3
 """
-Build reference/bugcrowd-vrt-flat.txt from Bugcrowd's official Vulnerability Rating
-Taxonomy (VRT), flattened to one line per leaf:
+Build the local Bugcrowd Vulnerability Rating Taxonomy (VRT) reference files from
+Bugcrowd's official, open-source taxonomy. Two outputs:
 
-    P<priority><TAB><Category > Sub > Specific>
+    reference/bugcrowd-vrt-flat.txt       P<priority><TAB><Category > Sub > Specific>
+    reference/bugcrowd-vrt-enriched.tsv   id<TAB>P<TAB>name path<TAB>cvss_v3<TAB>cvss_v4<TAB>cwe
 
-The validator greps this file to quote an exact VRT line when scoring a Bugcrowd finding.
-We do NOT redistribute the VRT in this repo; we fetch it from Bugcrowd's published,
-open-source taxonomy so the data stays authoritative and correctly attributed.
+The flat file is what the validator greps to quote an exact VRT line. The enriched TSV
+adds Bugcrowd's OWN authored CVSS v3.1 and v4.0 vectors and the CWE per node, joined from
+the taxonomy's official mapping files — so the validator can cite Bugcrowd's suggested
+vector instead of deriving one blind. It also writes:
 
-Version identity is the git TAG, not a field inside the JSON: the taxonomy file itself
-carries only a `metadata.release_date`. Bugcrowd tags each release as `v<major>.<minor>[.<patch>]`
-(e.g. v1.19.1) and keeps the rolling edge on `master`.
+    reference/bugcrowd-vrt-deprecated.json   old-node -> {version: new-node}  (for vrt_diff.py)
 
-Source:  https://github.com/bugcrowd/vulnerability-rating-taxonomy
-License:  the VRT is Bugcrowd's; see their repository for its terms.
+The VRT is Bugcrowd's; we do NOT redistribute it, we fetch it. Version identity is the git
+TAG (v1.2 … newest); the JSON itself carries only metadata.release_date.
 
 Usage:
     python3 scripts/build_vrt.py                    # newest tagged release (default)
     python3 scripts/build_vrt.py --version 1.18     # a specific release (v-prefix optional)
     python3 scripts/build_vrt.py --version master    # the rolling, pre-release edge
     python3 scripts/build_vrt.py --list-versions     # print available releases and exit
-    python3 scripts/build_vrt.py --source taxonomy.json   # build from a local file
+    python3 scripts/build_vrt.py --no-mappings       # flat file only, skip CVSS/CWE/deprecated
+    python3 scripts/build_vrt.py --source taxonomy.json   # build from a local file (flat only)
+
+Source: https://github.com/bugcrowd/vulnerability-rating-taxonomy
 """
 import argparse
 import json
 import os
 import re
 import sys
+import urllib.error
 import urllib.request
 
 REPO = "bugcrowd/vulnerability-rating-taxonomy"
-RAW_URL = "https://raw.githubusercontent.com/{repo}/{ref}/vulnerability-rating-taxonomy.json"
+RAW = "https://raw.githubusercontent.com/{repo}/{ref}/{path}"
 TAGS_API = "https://api.github.com/repos/{repo}/tags?per_page=100"
-OUT = os.path.join(os.path.dirname(__file__), "..", "reference", "bugcrowd-vrt-flat.txt")
+REF_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "reference"))
+OUT_FLAT = os.path.join(REF_DIR, "bugcrowd-vrt-flat.txt")
+OUT_ENRICHED = os.path.join(REF_DIR, "bugcrowd-vrt-enriched.tsv")
+OUT_DEPRECATED = os.path.join(REF_DIR, "bugcrowd-vrt-deprecated.json")
+
+MAPPINGS = {  # output key -> (path in repo, leaf field)
+    "cvss_v3": ("mappings/cvss_v3/cvss_v3.json", "cvss_v3"),
+    "cvss_v4": ("mappings/cvss_v4/cvss_v4.json", "cvss_v4"),
+    "cwe": ("mappings/cwe/cwe.json", "cwe"),
+}
+DEPRECATED_PATH = "deprecated-node-mapping.json"
 
 
 def _get(url: str) -> bytes:
@@ -43,20 +57,17 @@ def _get(url: str) -> bytes:
 
 
 def _ver_key(tag: str) -> tuple:
-    """Sort key for a 'v1.19.1'-style tag: (1, 19, 1). Unparseable tags sort first."""
     nums = re.findall(r"\d+", tag)
     return tuple(int(n) for n in nums) if nums else ()
 
 
 def list_tags() -> list[str]:
-    """All release tags, newest first. Raises on network/API failure."""
     data = json.loads(_get(TAGS_API.format(repo=REPO)).decode("utf-8"))
     tags = [t["name"] for t in data if isinstance(t, dict) and t.get("name")]
     return sorted(tags, key=_ver_key, reverse=True)
 
 
 def resolve_ref(version: str) -> str:
-    """Turn a --version value into a git ref (branch or tag) to fetch from."""
     v = version.strip()
     if v in ("master", "main", "HEAD"):
         return v
@@ -65,63 +76,59 @@ def resolve_ref(version: str) -> str:
         if not tags:
             raise RuntimeError("no release tags found on GitHub")
         return tags[0]
-    # a specific release: accept '1.18', 'v1.18', '1.18.0' — normalise to a 'v' tag
     return v if v.startswith("v") else f"v{v}"
 
 
-def load_remote(ref: str) -> dict:
-    url = RAW_URL.format(repo=REPO, ref=ref)
-    print(f"Fetching VRT @ {ref} from {url}", file=sys.stderr)
+def fetch_json(ref: str, path: str, required: bool = True) -> dict | None:
+    url = RAW.format(repo=REPO, ref=ref, path=path)
     try:
         return json.loads(_get(url).decode("utf-8"))
-    except urllib.error.HTTPError as e:  # noqa: PERF203
+    except urllib.error.HTTPError as e:
         if e.code == 404:
-            raise SystemExit(
-                f"ERROR: no VRT found at ref '{ref}' (HTTP 404).\n"
-                f"       Run `python3 {sys.argv[0]} --list-versions` to see valid releases."
-            )
+            if required:
+                raise SystemExit(
+                    f"ERROR: not found at ref '{ref}' (HTTP 404): {path}\n"
+                    f"       Run `python3 {sys.argv[0]} --list-versions` to see valid releases."
+                )
+            return None
         raise
 
 
-def load_local(source: str) -> dict:
-    with open(source, "r", encoding="utf-8") as fh:
-        return json.load(fh)
+def leaf_values(data: dict | None, field: str) -> dict[str, str]:
+    """Flatten a mapping tree to {dotted-id-path: field-value} for leaf nodes."""
+    out: dict[str, str] = {}
+    if not data:
+        return out
+    content = data.get("content", data if isinstance(data, list) else [])
 
+    def walk(nodes, trail):
+        for n in nodes:
+            nid = n.get("id") or n.get("name") or "?"
+            path = trail + [nid]
+            ch = n.get("children")
+            if ch:
+                walk(ch, path)
+            else:
+                val = n.get(field)
+                if isinstance(val, list):
+                    val = ";".join(str(x) for x in val if x is not None) or None
+                if val:
+                    out[".".join(path)] = str(val)
 
-def prio(node: dict) -> str:
-    p = node.get("priority")
-    return f"P{p}" if isinstance(p, int) else "P?"  # null/varies -> P?
-
-
-def walk(nodes: list, trail: list[str], out: list[str]) -> None:
-    for node in nodes:
-        name = node.get("name") or node.get("id") or "?"
-        path = trail + [name]
-        children = node.get("children")
-        if children:
-            walk(children, path, out)
-        else:
-            out.append(f"{prio(node)}\t{' > '.join(path)}")
+    walk(content, [])
+    return out
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description="Flatten Bugcrowd's VRT to reference/bugcrowd-vrt-flat.txt.",
+        description="Build the Bugcrowd VRT reference files (flat + enriched).",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    ap.add_argument(
-        "--version",
-        default="latest",
-        metavar="REF",
-        help="VRT release to build: 'latest' (newest tag, default), a release like "
-        "'1.18' / 'v1.18', or 'master' for the rolling edge.",
-    )
-    ap.add_argument(
-        "--list-versions",
-        action="store_true",
-        help="print the available VRT releases (newest first) and exit.",
-    )
-    ap.add_argument("--source", help="build from a local vulnerability-rating-taxonomy.json instead of fetching")
+    ap.add_argument("--version", default="latest", metavar="REF",
+                    help="release to build: 'latest' (default), '1.18'/'v1.18', or 'master'.")
+    ap.add_argument("--list-versions", action="store_true", help="print available releases and exit.")
+    ap.add_argument("--no-mappings", action="store_true", help="flat file only; skip CVSS/CWE/deprecated mappings.")
+    ap.add_argument("--source", help="build the flat file from a local taxonomy JSON (no mappings).")
     args = ap.parse_args()
 
     if args.list_versions:
@@ -130,42 +137,97 @@ def main() -> int:
         except Exception as e:  # noqa: BLE001
             print(f"ERROR: could not list versions: {e}", file=sys.stderr)
             return 1
-        print(f"Available Bugcrowd VRT releases (newest first), plus 'master':\n")
+        print("Available Bugcrowd VRT releases (newest first), plus 'master':\n")
         print("  master  (rolling, pre-release edge)")
         for t in tags:
             print(f"  {t}")
         return 0
 
+    # Load the main taxonomy
     if args.source:
-        data = load_local(args.source)
+        with open(args.source, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
         ref_label = f"local:{os.path.basename(args.source)}"
+        ref = None
+        do_mappings = False
     else:
         ref = resolve_ref(args.version)
-        data = load_remote(ref)
+        print(f"Fetching VRT @ {ref}", file=sys.stderr)
+        data = fetch_json(ref, "vulnerability-rating-taxonomy.json")
         ref_label = f"{REPO}@{ref}"
+        do_mappings = not args.no_mappings
 
-    content = data.get("content", data if isinstance(data, list) else [])
     release_date = ""
     if isinstance(data, dict):
         release_date = (data.get("metadata") or {}).get("release_date", "") or ""
 
-    lines: list[str] = []
-    walk(content, [], lines)
-    if not lines:
+    # Load mappings (best effort — older releases may lack cvss_v4)
+    maps: dict[str, dict[str, str]] = {k: {} for k in MAPPINGS}
+    map_status: list[str] = []
+    if do_mappings:
+        for key, (path, field) in MAPPINGS.items():
+            print(f"Fetching mapping {key} @ {ref}", file=sys.stderr)
+            md = fetch_json(ref, path, required=False)
+            maps[key] = leaf_values(md, field)
+            map_status.append(f"{key}:{len(maps[key]) if md else 'absent'}")
+
+    # Walk the main taxonomy, tracking BOTH the name path and the dotted id path
+    content = data.get("content", data if isinstance(data, list) else [])
+    flat: list[str] = []
+    enriched: list[str] = []
+
+    def walk(nodes, name_trail, id_trail):
+        for n in nodes:
+            name = n.get("name") or n.get("id") or "?"
+            nid = n.get("id") or n.get("name") or "?"
+            names = name_trail + [name]
+            ids = id_trail + [nid]
+            ch = n.get("children")
+            if ch:
+                walk(ch, names, ids)
+            else:
+                p = n.get("priority")
+                prio = f"P{p}" if isinstance(p, int) else "P?"
+                name_path = " > ".join(names)
+                dotted = ".".join(ids)
+                flat.append(f"{prio}\t{name_path}")
+                if do_mappings:
+                    v3 = maps["cvss_v3"].get(dotted, "-")
+                    v4 = maps["cvss_v4"].get(dotted, "-")
+                    cwe = maps["cwe"].get(dotted, "-")
+                    enriched.append(f"{dotted}\t{prio}\t{name_path}\t{v3}\t{v4}\t{cwe}")
+
+    walk(content, [], [])
+    if not flat:
         print("ERROR: no VRT entries parsed — the schema may have changed.", file=sys.stderr)
         return 1
 
-    header = [
+    prov = (f"# source: {ref_label}" + (f"   release_date: {release_date}" if release_date else ""))
+    hdr = [
         "# Bugcrowd Vulnerability Rating Taxonomy (flattened) — one `P<n><TAB>category path` per line.",
         "# Built by adversarial-validator/scripts/build_vrt.py; the VRT is Bugcrowd's (not redistributed here).",
-        f"# source: {ref_label}" + (f"   release_date: {release_date}" if release_date else ""),
+        prov,
     ]
+    with open(OUT_FLAT, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(hdr) + "\n" + "\n".join(flat) + "\n")
+    print(f"Wrote {len(flat)} entries ({ref_label}) to {OUT_FLAT}")
 
-    out_path = os.path.normpath(OUT)
-    with open(out_path, "w", encoding="utf-8") as fh:
-        fh.write("\n".join(header) + "\n")
-        fh.write("\n".join(lines) + "\n")
-    print(f"Wrote {len(lines)} VRT entries ({ref_label}) to {out_path}")
+    if do_mappings:
+        ehdr = [
+            "# Bugcrowd VRT, enriched — columns: id<TAB>priority<TAB>name path<TAB>cvss_v3<TAB>cvss_v4<TAB>cwe",
+            "# cvss_v3/cvss_v4 are Bugcrowd's OWN authored vectors for the node ('-' if none); cwe is the mapped CWE.",
+            prov + f"   mappings: {', '.join(map_status)}",
+        ]
+        with open(OUT_ENRICHED, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(ehdr) + "\n" + "\n".join(enriched) + "\n")
+        print(f"Wrote {len(enriched)} enriched rows to {OUT_ENRICHED}")
+
+        dep = fetch_json(ref, DEPRECATED_PATH, required=False)
+        if dep is not None:
+            with open(OUT_DEPRECATED, "w", encoding="utf-8") as fh:
+                json.dump(dep, fh, indent=0)
+            print(f"Wrote deprecated-node map ({len(dep)} entries) to {OUT_DEPRECATED}")
+
     return 0
 
 
