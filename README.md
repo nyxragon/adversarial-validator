@@ -13,15 +13,9 @@
 
 </div>
 
-AI-assisted vulnerability hunting has a signal problem: the same model that finds a bug will cheerfully
-agree it is real the moment you ask. The result is a flood of false positives and mis-scored reports
-that is dragging down bug-bounty and coordinated-disclosure triage. The **Adversarial Finding Validator**
-is the counterweight: a Claude Code subagent that runs with **no hunting context**, sees only the
-evidence (never your hypothesis), and returns one of four verdicts with a severity it derives itself.
-
-> [!IMPORTANT]
-> The isolation is the whole point. A validator that knows your theory rubber-stamps it, so this one
-> is never told why you think the bug is real. It is built to prove you wrong.
+Ask the model that found your bug whether it is real and it reads your reasoning back as a yes. This
+validates it instead: a Claude Code subagent with no hunting context, the evidence only, never your
+hypothesis. Four verdicts, a severity it computes, built to disprove you.
 
 ---
 
@@ -46,23 +40,8 @@ NEXT:      Point the fetch at the metadata IP and capture the credential arrivin
            listener. Produce that and it becomes SUBMIT at the P2 line.
 ```
 
-It confirmed the bug, refused to hand you an unearned P2, split the proven priority from the ceiling,
-computed the number instead of guessing it, and named the one thing left to prove. That is the whole loop.
-
----
-
-## Why
-
-> [!NOTE]
-> AI-assisted hunting floods triage with false positives and mis-scored reports. Valid-rates are
-> dropping and programs have shut down over it.
-
-- **You cannot validate your own finding.** Ask an LLM "is this real?" with your reasoning attached and
-  it agrees with you.
-- **Reports die on severity, not just validity.** A Critical that recomputes to Medium gets downgraded;
-  an impact that was never demonstrated gets closed. This catches both before you send.
-- **It is a decision, not an opinion.** You get SUBMIT / PROVE / INVESTIGATE / DISCARD and the single
-  next step, not a paragraph of hedging.
+Confirmed the bug, refused the unearned P2, split the proven priority from the ceiling, and named the
+one thing left to prove.
 
 ---
 
@@ -96,9 +75,7 @@ python3 scripts/build_vrt.py --list-versions # see what is available
 
 ## Usage
 
-> [!TIP]
-> Give it **evidence, not your argument**. If you plead your case, you defeat the isolation that makes
-> it work.
+Give it evidence, not your argument:
 
 ```text
 /adversarial-validator:validate
@@ -111,19 +88,9 @@ python3 scripts/build_vrt.py --list-versions # see what is available
 
 Or launch the agent directly: `@agent-adversarial-validator:finding-validator`
 
-**Typical flow**
-
-- A fresh finding returns **PROVE** with the one proof to produce. You produce it, re-run, and it
-  becomes **SUBMIT**.
-- A bug you called Critical returns with a recomputed vector one band lower, so you file it right
-  instead of getting downgraded.
-- A "bug" that only reads your own request back returns **DISCARD**, with the artifact named.
-
 ---
 
 ## How it works
-
-A dedicated subagent, handed the evidence only and told to assume you were wrong and find out why.
 
 | | Verdict | Meaning | Next step |
 |:--:|---|---|---|
@@ -134,22 +101,13 @@ A dedicated subagent, handed the evidence only and told to assume you were wrong
 
 Every verdict carries:
 
-- **A severity it derives, not one you assert.** It chooses a vector one metric at a time, each
-  justified by the evidence, then a **deterministic calculator** (`score.py`, CVSS **3.1 and 4.0**)
-  computes the number — it never does the arithmetic by hand. *The vector is the claim; the number is
-  arithmetic.* It corrects over-scored and under-scored reports alike.
-- **Platform-aware anchoring.** Bugcrowd gets the exact VRT line **plus Bugcrowd's own authored
-  CVSS/CWE** (from the enriched taxonomy); HackerOne, Intigriti, YesWeHack, Synack, CVD, CVE and
-  GitHub advisories get a CVSS vector. If a finding was scored against an older VRT, `vrt_diff.py`
-  shows how that line moved (renamed / reprioritised / re-split).
-- **A false-positive screen** that rules out, by name, the artifacts that fake a positive — and a
-  **deterministic proof-schema check** (`proofcheck.py`) that verifies an oracle result is present
-  and self-consistent before any reasoning runs.
-- **Grounded dedup.** `dedup.py` checks NVD, GitHub advisories and your own validation ledger, and
-  fails *open* — an unreachable source leaves the question open, never a false "novel".
-- **It will not suppress a true positive.** A DISCARD requires a positive refutation artifact;
-  "I don't see impact" floors at INVESTIGATE, and high-blast-radius classes must survive the
-  validator attacking its own DISCARD.
+- **A computed severity.** A per-metric-cited vector; `score.py` (CVSS 3.1 and 4.0) returns the number.
+- **Platform anchoring.** Bugcrowd gets the exact VRT line + Bugcrowd's authored CVSS/CWE; everyone else
+  a CVSS vector. `vrt_diff.py` re-anchors a finding scored against an older VRT.
+- **A false-positive screen** by name, plus `proofcheck.py` to check the oracle artifact is self-consistent.
+- **Grounded dedup.** `dedup.py` over NVD + GHSA + your ledger, fails open (unreachable ≠ novel).
+- **No true-positive suppression.** DISCARD needs a refutation artifact; "no impact seen" floors at
+  INVESTIGATE; high-blast-radius classes must survive the validator attacking its own DISCARD.
 
 <details>
 <summary>What the false-positive screen catches</summary>
@@ -160,8 +118,8 @@ Every verdict carries:
 - Reflected markers (your own request echoed back)
 - Versions read from a filename rather than file contents
 - Oracles run without a negative control
-- Always-informational classes (missing headers, self-XSS, DNS-only SSRF, open redirect with no
-  chain) are rejected unless chained to real impact
+- Always-informational classes (missing headers, self-XSS, DNS-only SSRF, open redirect with no chain)
+  are rejected unless chained to real impact
 
 </details>
 
@@ -169,32 +127,25 @@ Every verdict carries:
 
 ## Configuration
 
-- Severity follows the platform you state, and defaults to CVSS 3.1 when none is given.
-- The Bugcrowd VRT table is built locally by `scripts/build_vrt.py` and read from `reference/`.
-  It defaults to the **newest tagged VRT release**; pin an older one with `--version <release>`
-  (e.g. `--version 1.18`), track the rolling edge with `--version master`, or list what is
-  available with `--list-versions`. The built file records which version it holds in a header.
-  From inside Claude Code the same is a slash command: `/vrt` (newest), `/vrt 1.18` (pin),
-  `/vrt master` (edge), `/vrt list` (show releases).
-- The agent runs on `model: opus`.
+- Severity follows the platform you state, defaulting to CVSS 3.1.
+- The Bugcrowd VRT table is built by `scripts/build_vrt.py` and read from `reference/`. It defaults to the
+  newest tagged release; pin one with `--version 1.18`, track the edge with `--version master`, or
+  `--list-versions`. From inside Claude Code: `/vrt`, `/vrt 1.18`, `/vrt master`, `/vrt list`.
+- The agent runs on `model: opus`; set it to `sonnet` in `agents/finding-validator.md` if you lack Opus access.
 
 **The deterministic toolbelt** (`scripts/`, pure stdlib, each self-tests with `--self-test`):
 
 | Tool | Does |
 |---|---|
-| `score.py` | CVSS 3.1 + 4.0 base score from a vector (no hand arithmetic) |
+| `score.py` | CVSS 3.1 + 4.0 base score from a vector |
 | `build_vrt.py` | build the flat + enriched VRT (official CVSS/CWE) at any version |
-| `vrt_diff.py` | how a VRT line moved between two releases (rename / reprioritise / re-split) |
-| `proofcheck.py` | verify a per-class oracle artifact is present and self-consistent |
+| `vrt_diff.py` | how a VRT line moved between two releases |
+| `proofcheck.py` | check a per-class (or generic) oracle artifact is present and self-consistent |
 | `dedup.py` | grounded prior-art (NVD + GHSA + your ledger), fails open |
 | `ledger.py` | append-only validation ledger for own-history dedup |
 | `sarif_ingest.py` | turn Semgrep/CodeQL/nuclei SARIF into bounty-gate finding stubs |
 
-`benchmarks/run.py` is a reproducible **validation** benchmark (labelled evidence → outcome,
-including instrument-artifact traps) over the deterministic spine.
-
-> [!NOTE]
-> No Opus access on your plan? Set `model:` to `sonnet` in `agents/finding-validator.md`.
+`benchmarks/run.py` is a reproducible validation benchmark over the deterministic spine.
 
 ---
 
