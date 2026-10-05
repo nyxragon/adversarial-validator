@@ -6,9 +6,9 @@ description: Run the adversarial finding-validator subagent on a candidate findi
 
 Launch the **`finding-validator`** subagent (Agent tool, `subagent_type: "finding-validator"`).
 
-It deliberately runs with **no hunting context**, so it cannot inherit the optimism of whoever found
-the bug. Do **not** paste your own reasoning about why the finding is good — give it the **evidence
-only**:
+It reviews your finding the way an **independent triager** would — on the evidence alone, blind to your
+reasoning, so it cannot inherit your optimism. Do **not** paste your own argument for why the finding is
+good; give it the **evidence only**:
 
 - the exact request(s) and response(s), with status, size, and body markers
 - the baseline/control that proves the response is not a catch-all or an instrument artifact

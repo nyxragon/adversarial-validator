@@ -13,9 +13,11 @@
 
 </div>
 
-Ask the model that found your bug whether it is real and it reads your reasoning back as a yes. This
-validates it instead: a Claude Code subagent with no hunting context, the evidence only, never your
-hypothesis. Four verdicts, a severity it computes, built to disprove you.
+Your bug-hunting model is also your worst reviewer: show it your reasoning and it agrees. The Adversarial
+Finding Validator reviews the finding the way an unbiased triager would — a separate Claude Code subagent
+that judges it on the evidence alone, never your hypothesis, so it inherits none of your optimism and is
+free to disprove you. Four verdicts, a severity it computes rather than one you assert, and a kill counts
+as a result.
 
 ---
 
