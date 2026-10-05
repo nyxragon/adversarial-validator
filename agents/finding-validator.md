@@ -136,12 +136,17 @@ You are a reasoning gate, not an exploit engine — so the strongest thing you c
 **demand a deterministic oracle artifact and verify it is present and self-consistent** before you
 reason. Three tools do the parts that must not be left to judgement:
 
-- **Proof schema.** If the finding has an oracle result (IDOR hashes, SSRF OOB hit, XSS dialog,
-  timing stats, race counts), express it as the small JSON the checker expects and run it:
-  `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/proofcheck.py <evidence.json>` (schema per class:
-  `--template <class>`). **PASS** = a valid artifact is present; **INCOMPLETE** = a required element
-  is missing → this is a **PROVE** lead, *not* a DISCARD; **FAIL** = the artifact is self-contradictory
-  or an instrument artifact → a kill. Do not override a FAIL with optimism.
+- **Proof schema (optional reinforcement — you do the vuln reasoning).** `proofcheck.py` checks the
+  *mechanics* of a proof, never the vulnerability: that is your job, for any class, from first
+  principles. If the finding has an oracle result, express it as the small JSON the checker expects and
+  run it: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/proofcheck.py <evidence.json>` (`--template <class>`;
+  classes idor/ssrf/ssrf_read/xss_*/sqli_time/race/rce/auth_bypass, else **`generic`** for any other
+  or novel class). **PASS** = a valid artifact is present; **INCOMPLETE** = a required element is
+  missing → a **PROVE** lead, *not* a DISCARD; **FAIL** = the artifact is self-contradictory or an
+  instrument artifact → a kill, so do not override a FAIL with optimism. **A template that does not fit,
+  or a class with no template, is NOT a refutation** — fall back to the generic principle (a
+  server-sourced marker that is not the request reflected + a negative control that held + reproduced)
+  and your own judgement. The tool is a floor under your reasoning, not a cage around it.
 - **Dedup, grounded.** Do not rely on recall. Query real disclosure surfaces and your own history:
   `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/dedup.py --vendor <v> --keyword "<class/component>" [--package <pkg>] [--class <c> --target <t>]`.
   An **unreachable** source means the dedup question stays **OPEN**, never a false "novel".

@@ -19,7 +19,14 @@ Usage:
     python3 scripts/proofcheck.py --template idor      # print the evidence schema for a class
     python3 scripts/proofcheck.py --self-test
 
-Classes: idor, ssrf, xss_reflected, xss_stored, sqli_time, race.
+This checks the MECHANICS of a proof, not the vulnerability — Claude does all the vuln
+reasoning. The per-class schemas (idor, ssrf, ssrf_read, xss_reflected, xss_stored,
+sqli_time, race, rce, auth_bypass) are conveniences; any other/novel class falls back to
+'generic', which encodes the invariant they all share: a server-sourced marker (not the
+request reflected) + a negative control that held + reproduced. So an unlisted class still
+gets a deterministic sanity-check, and a template never limits what can be validated — a
+mismatch or a missing template is not a refutation.
+
 Exit code: 0 = PASS, 1 = INCOMPLETE, 2 = FAIL, 3 = usage/parse error.
 """
 import json
@@ -65,12 +72,14 @@ def _idor(e):
         out.append((OK, f"attacker received the victim's data in all {len(att)} sessions (hash == owner_hash)"))
     else:
         out.append((FAIL, "attacker response hashes do not all equal the owner's — not the same object/data"))
-    if ctrl in (401, 403, 404):
-        out.append((OK, f"negative control held (unauthorized/invented id -> {ctrl})"))
-    elif ctrl is None:
-        out.append((MISS, "control_status: attacker reads an invented/unauthorized id (expect 401/403/404)"))
+    if ctrl is None:
+        out.append((MISS, "control_status: attacker reads an invented/unauthorized id (expect a 4xx deny)"))
+    elif 400 <= ctrl < 500:
+        out.append((OK, f"negative control held (invented/unauthorized id -> {ctrl}, differs from the 200 hit)"))
+    elif 200 <= ctrl < 300:
+        out.append((FAIL, f"negative control also returned {ctrl} — same as the hit, so the 200 may be a catch-all"))
     else:
-        out.append((FAIL, f"negative control returned {ctrl}, not 401/403/404 — the 200 may be a catch-all"))
+        out.append((FAIL, f"negative control returned {ctrl}; expected a 4xx deny that differs from the hit"))
     return out
 
 
@@ -129,6 +138,13 @@ def _xss_stored(e):
         out.append((FAIL, "trigger is console/curl/self — proves the payload valid, not reachable (PROVE lead)"))
     else:
         out.append((MISS, "trigger: 'natural' victim action (console/curl is not reachability)"))
+    # rendered != executed: demand an observed execution oracle, not just injection
+    if e.get("executed") is True and e.get("nonce") and e.get("execution_marker") == e.get("nonce"):
+        out.append((OK, "code execution observed (headless/browser oracle fired the planted nonce)"))
+    elif e.get("executed") is True and not e.get("nonce"):
+        out.append((MISS, "nonce + execution_marker: prove the fire is yours, not an incidental script"))
+    else:
+        out.append((MISS, "executed: injection may be shown, but code execution is not observed (rendered != executed)"))
     return out
 
 
@@ -180,10 +196,104 @@ def _race(e):
     return out
 
 
+def _rce(e):
+    out = []
+    nonce = e.get("cmd_nonce")
+    text = e.get("output") or ""
+    if not nonce:
+        out.append((MISS, "cmd_nonce: a unique token your injected command emits"))
+    elif nonce in text:
+        out.append((OK, "command output contains the attacker-chosen nonce"))
+    else:
+        out.append((FAIL, "cmd_nonce does not appear in the output — not a confirmed execution"))
+    sm = e.get("server_only_marker")
+    if not sm:
+        out.append((MISS, "server_only_marker: output the attacker could NOT supply (uid=, hostname, kernel)"))
+    elif sm in text:
+        out.append((OK, f"server-only marker present ('{sm}') — genuine execution, not a reflected echo"))
+    else:
+        out.append((FAIL, "server_only_marker not found in the output"))
+    if _num(e.get("repetitions")) and _num(e.get("repetitions")) >= 2:
+        out.append((OK, "reproduced >=2 times (nonce/marker vary per run)"))
+    else:
+        out.append((MISS, "repetitions: reproduce >=2 times"))
+    return out
+
+
+def _auth_bypass(e):
+    out = []
+    if e.get("unauth_or_forged") is True:
+        out.append((OK, "request carried no valid credential (unauthenticated or forged/unsigned token)"))
+    else:
+        out.append((MISS, "unauth_or_forged: show the request used no valid session or a forged token"))
+    pm = e.get("privileged_marker")
+    if not pm:
+        out.append((MISS, "privileged_marker: a server-set field proving privileged identity (admin:true, victim username)"))
+    elif e.get("marker_server_set") is False:
+        out.append((FAIL, "privileged_marker is attacker-supplied (in the token/request) — not proof the server granted it"))
+    else:
+        out.append((OK, f"server granted a privileged identity ('{pm}') from server state, not attacker input"))
+    if e.get("control_rejected") is True:
+        out.append((OK, "the correctly-validating sibling/path rejects the same input (negative control holds)"))
+    else:
+        out.append((MISS, "control_rejected: show the proper validation path rejects the forged/absent credential"))
+    return out
+
+
+def _ssrf_read(e):
+    """Response-read SSRF: the internal response body is returned to the attacker
+    (strictly stronger than an OOB callback, which the 'ssrf' schema covers)."""
+    out = []
+    marker = e.get("internal_marker")
+    if not marker:
+        out.append((MISS, "internal_marker: a target-specific string from the internal response (cluster_uuid, metadata field)"))
+    elif e.get("marker_in_request"):
+        out.append((FAIL, "internal_marker also appears in the request — cannot distinguish from reflection"))
+    else:
+        out.append((OK, "internal response content was returned to the attacker, with a marker not in the request"))
+    ctrl = e.get("control_status")
+    if ctrl is None:
+        out.append((MISS, "control_status: an invalid/benign host should differ (e.g. 500/timeout), proving a real fetch"))
+    elif 200 <= ctrl < 300:
+        out.append((FAIL, f"invalid-host control also returned {ctrl} — the success may not be a real outbound fetch"))
+    else:
+        out.append((OK, f"invalid-host control differs ({ctrl}) — the success is a genuine outbound fetch"))
+    return out
+
+
+def _generic(e):
+    """Class-agnostic proof principle, for ANY vuln with no specific template above.
+    The specific schemas are conveniences; this is the invariant they all encode, so a
+    novel/unlisted class still gets a deterministic sanity-check instead of none. Claude
+    still does all the vuln reasoning — this only checks the mechanics of the proof."""
+    out = []
+    marker = e.get("marker")
+    if not marker:
+        out.append((MISS, "marker: a target-specific value that proves the effect (server-sourced, not a status code)"))
+    elif e.get("marker_in_request") or e.get("marker_attacker_supplied"):
+        out.append((FAIL, "marker is attacker-supplied / in the request — indistinguishable from reflection"))
+    else:
+        out.append((OK, "a server-sourced marker proves the effect (attacker could not have supplied it)"))
+    if e.get("negative_control_held") is True:
+        out.append((OK, "a negative control (invented/benign input) differed in the same run"))
+    elif e.get("negative_control_held") is False:
+        out.append((FAIL, "the negative control did NOT differ — the result may be a catch-all/instrument artifact"))
+    else:
+        out.append((MISS, "negative_control_held: run an invented/benign control that must NOT fire, same run"))
+    if _num(e.get("repetitions")) and _num(e.get("repetitions")) >= 2:
+        out.append((OK, "reproduced >=2 times"))
+    else:
+        out.append((MISS, "repetitions: reproduce >=2 times"))
+    return out
+
+
 SCHEMAS = {
     "idor": _idor, "bola": _idor, "bfla": _idor,
-    "ssrf": _ssrf, "xss_reflected": _xss_reflected, "xss_stored": _xss_stored,
+    "ssrf": _ssrf, "ssrf_read": _ssrf_read, "ssrf-read": _ssrf_read,
+    "xss_reflected": _xss_reflected, "xss_stored": _xss_stored,
     "sqli_time": _sqli_time, "race": _race,
+    "rce": _rce, "auth_bypass": _auth_bypass, "auth-bypass": _auth_bypass, "authbypass": _auth_bypass,
+    "generic": _generic, "other": _generic,
 }
 
 TEMPLATES = {
@@ -193,18 +303,26 @@ TEMPLATES = {
              "oob_nonce": "<nonce>", "oob_protocol": "http", "oob_received": True},
     "xss_reflected": {"class": "xss_reflected", "nonce": "<nonce>", "dialog_fired": True,
                       "dialog_text": "<nonce>", "repetitions": 3, "control_dialog": False},
-    "xss_stored": {"class": "xss_stored", "cross_user_delivery": True, "trigger": "natural"},
+    "xss_stored": {"class": "xss_stored", "cross_user_delivery": True, "trigger": "natural",
+                   "executed": True, "nonce": "<nonce>", "execution_marker": "<nonce>"},
     "sqli_time": {"class": "sqli_time", "injected_delay_s": 5,
                   "samples": [4.9, 5.1, 5.0, 4.8, 5.2, 5.0, 4.9, 5.1], "control_delay_s": 0.1, "p_value": 0.003},
     "race": {"class": "race", "concurrent_successes": 3, "attempts": 20, "control_sequential_successes": 0},
+    "rce": {"class": "rce", "cmd_nonce": "<nonce>", "output": "<nonce> uid=0(root) host=abc123",
+            "server_only_marker": "uid=0(root)", "repetitions": 2},
+    "auth_bypass": {"class": "auth_bypass", "unauth_or_forged": True, "privileged_marker": "admin:true",
+                    "marker_server_set": True, "control_rejected": True},
+    "ssrf_read": {"class": "ssrf_read", "internal_marker": "<cluster_uuid>", "marker_in_request": False,
+                  "control_status": 500},
+    "generic": {"class": "generic", "marker": "<server-sourced value proving the effect>",
+                "marker_in_request": False, "negative_control_held": True, "repetitions": 2},
 }
 
 
 def run(e: dict) -> tuple[str, str, list[tuple[str, str]]]:
     cls = (e.get("class") or "").lower()
-    if cls not in SCHEMAS:
-        return "FAIL", cls, [(FAIL, f"unknown class '{cls}'; known: {', '.join(sorted(set(SCHEMAS)))}")]
-    checks = _artifact_checks(e) + SCHEMAS[cls](e)
+    schema = SCHEMAS.get(cls, _generic)   # novel/unlisted class -> the generic proof principle, not a hard error
+    checks = _artifact_checks(e) + schema(e)
     if any(s == FAIL for s, _ in checks):
         verdict = "FAIL"
     elif any(s == MISS for s, _ in checks):
@@ -231,6 +349,7 @@ def _print(verdict, cls, checks) -> None:
 
 _SELF_TEST = [
     ({"class": "idor", "owner_hash": "ab", "attacker_hashes": ["ab", "ab", "ab"], "control_status": 404}, "PASS"),
+    ({"class": "idor", "owner_hash": "ab", "attacker_hashes": ["ab", "ab", "ab"], "control_status": 400}, "PASS"),
     ({"class": "idor", "owner_hash": "ab", "attacker_hashes": ["ab", "cd", "ab"], "control_status": 404}, "FAIL"),
     ({"class": "idor", "owner_hash": "ab", "attacker_hashes": ["ab", "ab", "ab"], "control_status": 200}, "FAIL"),
     ({"class": "idor", "owner_hash": "ab", "attacker_hashes": ["ab"], "control_status": 404}, "INCOMPLETE"),
@@ -240,12 +359,31 @@ _SELF_TEST = [
     ({"class": "xss_reflected", "nonce": "z9", "dialog_fired": True, "dialog_text": "z9", "repetitions": 3, "control_dialog": False}, "PASS"),
     ({"class": "xss_reflected", "nonce": "z9", "dialog_fired": True, "dialog_text": "z9", "repetitions": 3, "control_dialog": True}, "FAIL"),
     ({"class": "xss_stored", "cross_user_delivery": True, "trigger": "console"}, "FAIL"),
-    ({"class": "xss_stored", "cross_user_delivery": True, "trigger": "natural"}, "PASS"),
+    ({"class": "xss_stored", "cross_user_delivery": True, "trigger": "natural"}, "INCOMPLETE"),  # injection only, no execution
+    ({"class": "xss_stored", "cross_user_delivery": True, "trigger": "natural",
+      "executed": True, "nonce": "z9", "execution_marker": "z9"}, "PASS"),
     ({"class": "sqli_time", "injected_delay_s": 5, "samples": [4.9, 5.1, 5, 4.8, 5.2, 5, 4.9, 5.1], "p_value": 0.003, "control_delay_s": 0.1}, "PASS"),
     ({"class": "sqli_time", "injected_delay_s": 5, "samples": [0.1, 0.2, 0.1, 0.1, 0.2, 0.1, 0.1, 0.1], "p_value": 0.5, "control_delay_s": 0.1}, "FAIL"),
     ({"class": "race", "concurrent_successes": 3, "control_sequential_successes": 0}, "PASS"),
     ({"class": "race", "concurrent_successes": 3, "control_sequential_successes": 2}, "FAIL"),
     ({"class": "ssrf", "payload_url": "http://n1.oob", "oob_nonce": "n1", "oob_protocol": "http", "oob_received": True, "marker_reflected": True}, "FAIL"),
+    # rce
+    ({"class": "rce", "cmd_nonce": "q7", "output": "q7 uid=0(root) host=abc", "server_only_marker": "uid=0(root)", "repetitions": 2}, "PASS"),
+    ({"class": "rce", "cmd_nonce": "q7", "output": "q7 echoed back only", "server_only_marker": "uid=0(root)", "repetitions": 2}, "FAIL"),
+    ({"class": "rce", "cmd_nonce": "q7", "output": "q7 uid=0(root)", "server_only_marker": "uid=0(root)", "repetitions": 1}, "INCOMPLETE"),
+    # auth_bypass
+    ({"class": "auth_bypass", "unauth_or_forged": True, "privileged_marker": "admin:true", "marker_server_set": True, "control_rejected": True}, "PASS"),
+    ({"class": "auth_bypass", "unauth_or_forged": True, "privileged_marker": "admin:true", "marker_server_set": False, "control_rejected": True}, "FAIL"),
+    ({"class": "auth_bypass", "unauth_or_forged": True, "privileged_marker": "admin:true", "marker_server_set": True}, "INCOMPLETE"),
+    # ssrf_read (response-read)
+    ({"class": "ssrf_read", "internal_marker": "JwZL0BLq", "marker_in_request": False, "control_status": 500}, "PASS"),
+    ({"class": "ssrf_read", "internal_marker": "JwZL0BLq", "marker_in_request": True, "control_status": 500}, "FAIL"),
+    ({"class": "ssrf_read", "internal_marker": "JwZL0BLq", "marker_in_request": False, "control_status": 200}, "FAIL"),
+    # generic principle + novel/unlisted class falling back to it
+    ({"class": "generic", "marker": "srv-xyz", "marker_in_request": False, "negative_control_held": True, "repetitions": 2}, "PASS"),
+    ({"class": "generic", "marker": "srv-xyz", "marker_in_request": True, "negative_control_held": True, "repetitions": 2}, "FAIL"),
+    ({"class": "prototype_pollution", "marker": "polluted-7f", "marker_in_request": False, "negative_control_held": True, "repetitions": 2}, "PASS"),
+    ({"class": "some_novel_class", "marker": "m1", "marker_in_request": False, "negative_control_held": False, "repetitions": 2}, "FAIL"),
 ]
 
 
