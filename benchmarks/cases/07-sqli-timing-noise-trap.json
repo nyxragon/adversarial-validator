@@ -1,0 +1,22 @@
+{
+  "name": "07-sqli-timing-noise-trap",
+  "kind": "proof",
+  "input": {
+    "class": "sqli_time",
+    "injected_delay_s": 5,
+    "samples": [
+      0.1,
+      0.2,
+      0.1,
+      0.1,
+      0.2,
+      0.1,
+      0.1,
+      0.1
+    ],
+    "p_value": 0.6,
+    "control_delay_s": 0.1
+  },
+  "expect": "FAIL",
+  "note": "no significant delay => timing noise, not SQLi"
+}

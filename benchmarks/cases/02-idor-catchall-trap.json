@@ -1,0 +1,16 @@
+{
+  "name": "02-idor-catchall-trap",
+  "kind": "proof",
+  "input": {
+    "class": "idor",
+    "owner_hash": "a1",
+    "attacker_hashes": [
+      "a1",
+      "a1",
+      "a1"
+    ],
+    "control_status": 200
+  },
+  "expect": "FAIL",
+  "note": "looks like a hit but invented id also 200 => catch-all"
+}

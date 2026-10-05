@@ -1,0 +1,9 @@
+{
+  "name": "10-sev-crit-rce",
+  "kind": "severity",
+  "input": {
+    "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+  },
+  "expect": "9.8 Critical",
+  "note": "unauth RCE"
+}

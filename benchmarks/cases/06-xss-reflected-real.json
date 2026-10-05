@@ -1,0 +1,14 @@
+{
+  "name": "06-xss-reflected-real",
+  "kind": "proof",
+  "input": {
+    "class": "xss_reflected",
+    "nonce": "q3",
+    "dialog_fired": true,
+    "dialog_text": "q3",
+    "repetitions": 3,
+    "control_dialog": false
+  },
+  "expect": "PASS",
+  "note": "headless dialog == nonce, control silent"
+}

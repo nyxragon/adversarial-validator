@@ -16,15 +16,23 @@ only**:
 - what concrete data or state change was demonstrated
 - the target platform (Bugcrowd / HackerOne / Intigriti / YesWeHack / CVD / CVE), and any dedup done
 
+The validator computes severity deterministically (`score.py`, CVSS 3.1 **and** 4.0), quotes the
+exact Bugcrowd VRT line plus Bugcrowd's own vector (`bugcrowd-vrt-enriched.tsv`), checks any oracle
+result against a per-class proof schema (`proofcheck.py`), and grounds dedup against NVD/GHSA and
+your ledger (`dedup.py`). For a **High+ finding** it can run the differentiated adversarial panel
+(`reference/panel-lenses.md`). It never does CVSS arithmetic by hand and never DISCARDs on "I don't
+see impact" alone.
+
 ## It returns
 
 ```
 VERDICT:   SUBMIT | PROVE | INVESTIGATE | DISCARD
 PLATFORM:  <stated platform, or default CVSS 3.1>
-SEVERITY:  <CVSS:3.1 vector> = <score> <band>   |   Bugcrowd: P<n> "<exact VRT line>"
+SEVERITY:  <vector> = <score> <band> (tool-computed, per-metric cited)  |  Bugcrowd: P<n> "<VRT line>"
+PROOF:     proofcheck result (PASS / INCOMPLETE=PROVE-lead / FAIL=kill)
 GATE:      which gate questions fail
 FP CHECK:  which instrument artifact was ruled out, and how
-DEDUP:     prior-disclosure check and result
+DEDUP:     NO-PUBLIC-MATCH / POSSIBLE-DUP / INCONCLUSIVE
 REASON:    the single most important reason for the verdict
 NEXT:      the one proof (PROVE) or open question (INVESTIGATE) to resolve
 ```

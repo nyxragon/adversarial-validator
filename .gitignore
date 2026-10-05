@@ -1,6 +1,8 @@
 # The Bugcrowd VRT is fetched at build time from Bugcrowd's official taxonomy,
 # not redistributed in this MIT repo. Run: python3 scripts/build_vrt.py
 reference/bugcrowd-vrt-flat.txt
+reference/bugcrowd-vrt-enriched.tsv
+reference/bugcrowd-vrt-deprecated.json
 
 # local only, never publish: conference submission draft + strategy notes
 SUBMISSION-DRAFT.md

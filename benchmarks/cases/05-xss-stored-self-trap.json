@@ -1,0 +1,11 @@
+{
+  "name": "05-xss-stored-self-trap",
+  "kind": "proof",
+  "input": {
+    "class": "xss_stored",
+    "cross_user_delivery": true,
+    "trigger": "console"
+  },
+  "expect": "FAIL",
+  "note": "payload valid but fired via console => not reachable"
+}

@@ -1,0 +1,13 @@
+{
+  "name": "03-ssrf-full-oob",
+  "kind": "proof",
+  "input": {
+    "class": "ssrf",
+    "payload_url": "http://k7.oob",
+    "oob_nonce": "k7",
+    "oob_protocol": "http",
+    "oob_received": true
+  },
+  "expect": "PASS",
+  "note": "server-side HTTP fetch with bound nonce"
+}

@@ -1,0 +1,13 @@
+{
+  "name": "04-ssrf-dns-only-trap",
+  "kind": "proof",
+  "input": {
+    "class": "ssrf",
+    "payload_url": "http://k7.oob",
+    "oob_nonce": "k7",
+    "oob_protocol": "dns",
+    "oob_received": true
+  },
+  "expect": "FAIL",
+  "note": "DNS-only: resolution not a fetch => rejected alone"
+}

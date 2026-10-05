@@ -1,0 +1,9 @@
+{
+  "name": "12-sev-v4-ssrf-internal",
+  "kind": "severity",
+  "input": {
+    "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:N/SC:H/SI:L/SA:N"
+  },
+  "expect": "7.8 High",
+  "note": "Bugcrowd's own v4 vector for SSRF internal secrets"
+}

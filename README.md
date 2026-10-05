@@ -32,22 +32,22 @@ Feed it the evidence for an SSRF you think is a High. It answers:
 ```text
 VERDICT:   PROVE
 PLATFORM:  Bugcrowd (VRT, with CVSS support)
-SEVERITY:  P2  Server Security Misconfiguration > SSRF > Internal High Impact   (if the read is shown)
-           demonstrated so far: P4  Server Security Misconfiguration > SSRF > External
-           CVSS support: CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:N/A:N = 2.7 Low
+SEVERITY:  demonstrated: P5  Server Security Misconfiguration > SSRF > External - Low impact
+           CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:C/C:N/I:N/A:L = 4.0 Medium  (Bugcrowd's own vector; score from score.py)
+           ceiling:      P2  Server Security Misconfiguration > SSRF > Internal Secrets Exposure  (if the read is shown)
+PROOF:     proofcheck PASS for the external fetch (OOB HTTP hit, nonce bound); INCOMPLETE for the internal read.
 GATE:      #9 fails. The server fetches an attacker-controlled external host, but reaching a
            restricted internal target (the priority rests on it) is not shown.
-FP CHECK:  Ruled out reflected-marker and DNS-only. A real HTTP GET and POST were received
-           server-side, not just a DNS callback.
-DEDUP:     No prior public disclosure found for this endpoint.
-REASON:    The SSRF primitive is proven live. P2 depends on reaching internal secrets, which the
-           evidence does not demonstrate; today it anchors to the external-SSRF line.
+FP CHECK:  Ruled out reflected-marker and DNS-only. A real HTTP GET was received server-side.
+DEDUP:     dedup.py -> NO-PUBLIC-MATCH for this endpoint.
+REASON:    The SSRF primitive is proven live, so it anchors to the external line today. The P2
+           ceiling depends on reaching internal secrets, which the evidence does not demonstrate.
 NEXT:      Point the fetch at the metadata IP and capture the credential arriving at your
            listener. Produce that and it becomes SUBMIT at the P2 line.
 ```
 
 It confirmed the bug, refused to hand you an unearned P2, split the proven priority from the ceiling,
-and named the one thing left to prove. That is the whole loop.
+computed the number instead of guessing it, and named the one thing left to prove. That is the whole loop.
 
 ---
 
@@ -134,12 +134,22 @@ A dedicated subagent, handed the evidence only and told to assume you were wrong
 
 Every verdict carries:
 
-- **A severity it derives, not one you assert.** It computes a CVSS 3.1 vector and, for Bugcrowd,
-  quotes the exact VRT line. *The vector is the claim; the number is arithmetic.* It corrects
-  over-scored and under-scored reports alike.
-- **Platform-aware anchoring.** Bugcrowd uses the VRT; HackerOne, Intigriti, YesWeHack and Synack use
-  CVSS 3.1; coordinated disclosure, CVE and GitHub advisories use CVSS 3.1.
-- **A false-positive screen** that rules out, by name, the artifacts that fake a positive.
+- **A severity it derives, not one you assert.** It chooses a vector one metric at a time, each
+  justified by the evidence, then a **deterministic calculator** (`score.py`, CVSS **3.1 and 4.0**)
+  computes the number — it never does the arithmetic by hand. *The vector is the claim; the number is
+  arithmetic.* It corrects over-scored and under-scored reports alike.
+- **Platform-aware anchoring.** Bugcrowd gets the exact VRT line **plus Bugcrowd's own authored
+  CVSS/CWE** (from the enriched taxonomy); HackerOne, Intigriti, YesWeHack, Synack, CVD, CVE and
+  GitHub advisories get a CVSS vector. If a finding was scored against an older VRT, `vrt_diff.py`
+  shows how that line moved (renamed / reprioritised / re-split).
+- **A false-positive screen** that rules out, by name, the artifacts that fake a positive — and a
+  **deterministic proof-schema check** (`proofcheck.py`) that verifies an oracle result is present
+  and self-consistent before any reasoning runs.
+- **Grounded dedup.** `dedup.py` checks NVD, GitHub advisories and your own validation ledger, and
+  fails *open* — an unreachable source leaves the question open, never a false "novel".
+- **It will not suppress a true positive.** A DISCARD requires a positive refutation artifact;
+  "I don't see impact" floors at INVESTIGATE, and high-blast-radius classes must survive the
+  validator attacking its own DISCARD.
 
 <details>
 <summary>What the false-positive screen catches</summary>
@@ -167,6 +177,21 @@ Every verdict carries:
   From inside Claude Code the same is a slash command: `/vrt` (newest), `/vrt 1.18` (pin),
   `/vrt master` (edge), `/vrt list` (show releases).
 - The agent runs on `model: opus`.
+
+**The deterministic toolbelt** (`scripts/`, pure stdlib, each self-tests with `--self-test`):
+
+| Tool | Does |
+|---|---|
+| `score.py` | CVSS 3.1 + 4.0 base score from a vector (no hand arithmetic) |
+| `build_vrt.py` | build the flat + enriched VRT (official CVSS/CWE) at any version |
+| `vrt_diff.py` | how a VRT line moved between two releases (rename / reprioritise / re-split) |
+| `proofcheck.py` | verify a per-class oracle artifact is present and self-consistent |
+| `dedup.py` | grounded prior-art (NVD + GHSA + your ledger), fails open |
+| `ledger.py` | append-only validation ledger for own-history dedup |
+| `sarif_ingest.py` | turn Semgrep/CodeQL/nuclei SARIF into bounty-gate finding stubs |
+
+`benchmarks/run.py` is a reproducible **validation** benchmark (labelled evidence → outcome,
+including instrument-artifact traps) over the deterministic spine.
 
 > [!NOTE]
 > No Opus access on your plan? Set `model:` to `sonnet` in `agents/finding-validator.md`.

@@ -6,7 +6,11 @@ The validator reads these at runtime via `${CLAUDE_PLUGIN_ROOT}/reference/...`.
 |---|---|---|
 | `cvss-3.1-metrics.md` | CVSS 3.1 base-metric reference + score bands | yes |
 | `platform-severity-map.md` | which severity system each bug-bounty platform uses | yes |
-| `bugcrowd-vrt-flat.txt` | flattened Bugcrowd VRT, one `P<n><TAB>path` per line | **no — build it** |
+| `panel-lenses.md` | the differentiated adversarial panel (artifact / dedup / severity) + the DISCARD rule | yes |
+| `CVSS-V4-NOTICE` | BSD-2-Clause attribution for the CVSS v4.0 tables vendored in `scripts/cvss4_tables.py` | yes |
+| `bugcrowd-vrt-flat.txt` | flattened Bugcrowd VRT, one `P<n><TAB>path` per line (greped for the VRT line) | **no — build it** |
+| `bugcrowd-vrt-enriched.tsv` | VRT + Bugcrowd's own `cvss_v3`/`cvss_v4`/`cwe` per node | **no — build it** |
+| `bugcrowd-vrt-deprecated.json` | deprecated-node map, used by `vrt_diff.py` for version drift | **no — build it** |
 
 ## Building the Bugcrowd VRT file
 

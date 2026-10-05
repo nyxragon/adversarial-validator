@@ -1,0 +1,14 @@
+{
+  "name": "09-reflected-marker-trap",
+  "kind": "proof",
+  "input": {
+    "class": "ssrf",
+    "payload_url": "http://k7.oob",
+    "oob_nonce": "k7",
+    "oob_protocol": "http",
+    "oob_received": true,
+    "marker_reflected": true
+  },
+  "expect": "FAIL",
+  "note": "the 'marker' is the request reflected back"
+}
